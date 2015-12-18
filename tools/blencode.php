@@ -59,6 +59,58 @@ function minify($fname)
     return $retval;
 }
 
+function convert_html($contents)
+{
+
+    $pos = 0;
+    $lastpos = 0;
+    $endpos = 0;
+    $rtncontent = "";
+    $currentcontent = "";
+    $pattern = array();
+    $pattern[] = '/\n/';
+    $pattern[] = '/\r/';
+    $replace = array();
+    $replace[] = "\\n";
+    $replace[] = "\\r";
+    while(1) {
+        // Find if there is any '<?php' escaped code inside
+        $pos = strpos($contents, "<?php", $pos);
+        // Code were found
+        if($pos !== false) {
+            // Seek if there is end of this script area
+            $endpos = strpos($contents, "?>", $pos);
+            if($pos >= $lastpos) {
+                // Wrap static HTML or something else inside generated PHP
+                $rtncontent .= "<?php echo \"";
+                $currentcontent = substr($contents, $lastpos, $pos - $lastpos);
+                $rtncontent .= preg_replace($pattern, $replace, $currentcontent);
+                $rtncontent .= "\"; ?>";
+            }
+            // If there is no end tag then use lenght
+            if($endpos === false)
+            {
+               $endpos = strlen($contents);
+            }
+
+            // Put code area in
+            $rtncontent .= substr($contents, $pos, (($endpos + 2) - $pos));
+
+            $lastpos = $endpos + 2;
+            $pos += 5;
+        } else {
+            if($endpos != strlen($contents)) {
+                $rtncontent .= "<?php echo \"";
+                $currentcontent = substr($contents, $endpos,  strlen($contents)- $endpos);
+                $rtncontent .= preg_replace($pattern, $replace, $currentcontent);
+                $rtncontent .= "\"; ?>";
+            }
+            return $rtncontent;
+        }
+    }
+    return "";
+}
+
 
 
 /*
@@ -119,6 +171,7 @@ if(file_exists($argv[1])) {
     echo "$B1 BLENC $B0 backup file : $backup_file\n";
     
     $contents = php_strip_whitespace($argv[1]);
+    $contents = convert_html($contents);
     file_put_contents('/tmp/blencode-txt', $contents);
     $contents = minify('/tmp/blencode-txt');
     $aS = array('<?php', '?>', '<?');

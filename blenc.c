@@ -111,7 +111,7 @@ PHP_MINIT_FUNCTION(blenc)
 	REGISTER_INI_ENTRIES();
 	
 	php_bl_keys = pemalloc(sizeof(HashTable), TRUE);
-	zend_hash_init(php_bl_keys, 0, NULL, _php_blenc_pefree_wrapper, TRUE);
+	zend_hash_init(php_bl_keys, 0, NULL, (dtor_func_t)_php_blenc_pefree_wrapper, TRUE);
 
 	zend_compile_file_old = zend_compile_file;
 	zend_compile_file = blenc_compile;
@@ -228,15 +228,16 @@ PHP_MINFO_FUNCTION(blenc)
 
 PHP_FUNCTION(blenc_encrypt) {
 	
-	char *data = NULL,  *retval = NULL, *key = NULL, *output_file = NULL;
+	unsigned char *key = NULL, *retval = NULL;
+	char *data = NULL, *output_file = NULL;
 	int output_len = 0, key_len = 0, data_len = 0, output_file_len = 0;
 	php_stream *stream;
-	zend_bool dup_key = FALSE;
+	//zend_bool dup_key = FALSE;
 	char main_key[] = BLENC_PROTECT_MAIN_KEY;
-	char *main_hash[33];
+	char main_hash[33];
 	b_byte *bfdata = NULL;
 	int bfdata_len = 0;
-	char *b64data = NULL;
+	unsigned char *b64data = NULL;
 	int b64data_len = 0;
 	blenc_header header = {BLENC_IDENT, PHP_BLENC_VERSION};
 
@@ -252,25 +253,25 @@ PHP_FUNCTION(blenc_encrypt) {
 	
 	if(key == NULL) {
 		key = php_blenc_gen_key(TSRMLS_C);
-	} else {
-		dup_key = TRUE;
-	}
+	} //else {
+	//	dup_key = TRUE;
+	//}
 
 	php_blenc_make_md5((char *)&header.md5, data, data_len TSRMLS_CC);
 	
 	retval = php_blenc_encode(data, key, data_len, &output_len TSRMLS_CC);
 
-	bfdata = php_blenc_encode(key, main_hash, strlen(key), &bfdata_len TSRMLS_CC);
+	bfdata = php_blenc_encode(key, (unsigned char *)main_hash, strlen((char *)key), &bfdata_len TSRMLS_CC);
 	b64data = php_base64_encode(bfdata, bfdata_len, &b64data_len);
 
 	if((stream = php_stream_open_wrapper(output_file, "wb", ENFORCE_SAFE_MODE | REPORT_ERRORS, NULL))) {
 
 		_php_stream_write(stream, (void *)&header, (int)sizeof(blenc_header) TSRMLS_CC);
-		_php_stream_write(stream, retval, output_len TSRMLS_CC);
+		_php_stream_write(stream, (char *)retval, output_len TSRMLS_CC);
 		php_stream_close(stream);
 
 		/* RETVAL_STRING(key, dup_key); */
-		RETVAL_STRINGL(b64data, b64data_len, TRUE);
+		RETVAL_STRINGL((char *)b64data, b64data_len, TRUE);
 	}
 
 	efree(retval);
@@ -318,7 +319,7 @@ static int php_blenc_load_keyhash(TSRMLS_D)
 	char *key = NULL;
 	char *keys = NULL;
 	char main_key[] = BLENC_PROTECT_MAIN_KEY;
-	char main_hash[33];
+	unsigned char main_hash[33];
 	b_byte *buff = NULL;
 	int buff_len = 0;
 	char *bfdata = NULL;
@@ -327,7 +328,7 @@ static int php_blenc_load_keyhash(TSRMLS_D)
 	keys = php_blenc_file_to_mem(BL_G(key_file) TSRMLS_CC);
 
 	memset(main_hash, '\0', sizeof(main_hash));
-	php_blenc_make_md5(main_hash, main_key, strlen(main_key) TSRMLS_CC);
+	php_blenc_make_md5((char *)main_hash, main_key, strlen(main_key) TSRMLS_CC);
 
 	if(keys) {
 		char *t = keys;
@@ -340,10 +341,10 @@ static int php_blenc_load_keyhash(TSRMLS_D)
 				continue;
 			}
 			
-			bfdata = php_base64_decode(key, strlen(key), &bfdata_len);
+			bfdata = (char *)php_base64_decode((unsigned char *)key, strlen(key), &bfdata_len);
 			buff = php_blenc_decode(bfdata, main_hash, bfdata_len, &buff_len TSRMLS_CC);
 
-			temp = pestrdup(buff, TRUE);
+			temp = pestrdup((char *)buff, TRUE);
 			if(zend_hash_next_index_insert(php_bl_keys, &temp, sizeof(char *), NULL) == FAILURE) {
 				zend_error(E_WARNING, "Could not add a key to the keyhash!");
 			}
@@ -370,7 +371,7 @@ b_byte *php_blenc_encode(void *script, unsigned char *key, int in_len, int *out_
 	
 	ctx = emalloc(sizeof(BLOWFISH_CTX));
 
-	Blowfish_Init (ctx, (unsigned char *)key, strlen(key));
+	Blowfish_Init (ctx, (unsigned char *)key, strlen((char *)key));
 
 
 	if((pad_size = in_len % 8)) {
@@ -435,15 +436,16 @@ b_byte *php_blenc_decode(void *input, unsigned char *key, int in_len, int *out_l
 {	
 	BLOWFISH_CTX ctx;
 	unsigned long hi, low;
+	unsigned long retval_size = 0;
 	int i;
 	b_byte *retval;
 	
-	Blowfish_Init (&ctx, (unsigned char*)key, strlen(key));
+	Blowfish_Init (&ctx, (unsigned char*)key, strlen((char *)key));
     
 	if(in_len % 8) {
 
 		zend_error(E_WARNING, "Attempted to decode non-blenc encrytped file.");
-		return estrdup("");
+		return (b_byte *)estrdup("");
 
 	} else {
 
@@ -451,7 +453,8 @@ b_byte *php_blenc_decode(void *input, unsigned char *key, int in_len, int *out_l
 
 	}
 	
-	memset(retval, '\0', sizeof(retval));
+        retval_size = sizeof(retval);
+	memset(retval, '\0', retval_size);
 
 	hi = 0x0L;
 	low = 0x0L;
@@ -491,7 +494,7 @@ b_byte *php_blenc_decode(void *input, unsigned char *key, int in_len, int *out_l
 	}
 	
 	retval[in_len] = '\0';
-	*out_len = strlen(retval);
+	*out_len = strlen((char *)retval);
 	
 	return retval;
 }
@@ -519,17 +522,17 @@ static unsigned char *php_blenc_gen_key(TSRMLS_D)
 	make_digest(retval, digest);
 	efree(tmp);
 	
-	return retval;
+	return (unsigned char *)retval;
 }
 
 zend_op_array *blenc_compile(zend_file_handle *file_handle, int type TSRMLS_DC) {
 
-	int i = 0, res = 0;
+	int i = 0;
 	size_t bytes;
 	php_stream *stream;
 	char *script = NULL;
 	b_byte *decoded = NULL;
-	unsigned int decoded_len = 0;
+	int decoded_len = 0;
 	unsigned int index = 0;
 	unsigned int script_len = 0;
 	zend_op_array *retval = NULL;
@@ -582,7 +585,7 @@ zend_op_array *blenc_compile(zend_file_handle *file_handle, int type TSRMLS_DC) 
 
 		char *md5;
 		char *encoded = &script[sizeof(blenc_header)];
-		char **key = NULL;
+		unsigned char **key = NULL;
 		
 		if(BL_G(expired)) {
 
@@ -600,7 +603,7 @@ zend_op_array *blenc_compile(zend_file_handle *file_handle, int type TSRMLS_DC) 
 			md5 = emalloc(33);
 			php_blenc_make_md5(md5, decoded, decoded_len TSRMLS_CC);
 
-			if(!strncmp(md5, header->md5, 32)) {
+			if(!strncmp(md5, (char *)header->md5, 32)) {
 
 				validated = TRUE;
 				efree(md5);
@@ -630,8 +633,8 @@ zend_op_array *blenc_compile(zend_file_handle *file_handle, int type TSRMLS_DC) 
 
 	if(validated && decoded != NULL) {
 
-		ZVAL_STRINGL(code, decoded, decoded_len, TRUE);
-		retval = zend_compile_string(code, file_handle->filename TSRMLS_CC);
+		ZVAL_STRINGL(code, (char *)decoded, decoded_len, TRUE);
+		retval = zend_compile_string(code, (char *)file_handle->filename TSRMLS_CC);
 
 	} else {
 

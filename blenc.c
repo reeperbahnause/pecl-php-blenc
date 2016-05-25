@@ -235,9 +235,18 @@ PHP_FUNCTION(blenc_encrypt) {
 	//zend_bool dup_key = FALSE;
 	char main_key[] = BLENC_PROTECT_MAIN_KEY;
 	char main_hash[33];
+#if ZEND_MODULE_API_NO < 20151012
 	b_byte *bfdata = NULL;
-	int bfdata_len = 0;
+#else
+    const unsigned char *bfdata = NULL;
+#endif
+    int bfdata_len = 0;
+#if ZEND_MODULE_API_NO < 20151012
 	unsigned char *b64data = NULL;
+#else
+	zend_string *b64data = NULL;
+    char *rtnstr = NULL;
+#endif
 	int b64data_len = 0;
 	blenc_header header = {BLENC_IDENT, PHP_BLENC_VERSION};
 
@@ -262,16 +271,26 @@ PHP_FUNCTION(blenc_encrypt) {
 	retval = php_blenc_encode(data, key, data_len, &output_len TSRMLS_CC);
 
 	bfdata = php_blenc_encode(key, (unsigned char *)main_hash, strlen((char *)key), &bfdata_len TSRMLS_CC);
-	b64data = php_base64_encode(bfdata, bfdata_len, &b64data_len);
-
-	if((stream = php_stream_open_wrapper(output_file, "wb", ENFORCE_SAFE_MODE | REPORT_ERRORS, NULL))) {
+#if ZEND_MODULE_API_NO < 20151012
+    b64data = php_base64_encode(bfdata, bfdata_len, &b64data_len);
+#else
+    b64data = php_base64_encode(bfdata, bfdata_len);
+#endif    
+    
+	if((stream = php_stream_open_wrapper(output_file, "wb", REPORT_ERRORS, NULL))) {
 
 		_php_stream_write(stream, (void *)&header, (int)sizeof(blenc_header) TSRMLS_CC);
 		_php_stream_write(stream, (char *)retval, output_len TSRMLS_CC);
 		php_stream_close(stream);
 
 		/* RETVAL_STRING(key, dup_key); */
+#if ZEND_MODULE_API_NO < 20151012
 		RETVAL_STRINGL((char *)b64data, b64data_len, TRUE);
+#else
+        rtnstr = strdup(ZSTR_VAL(b64data));
+        zend_string_release(b64data);
+		RETVAL_STRINGL((char *)rtnstr, b64data_len);
+#endif        
 	}
 
 	efree(retval);
@@ -294,14 +313,26 @@ static char *php_blenc_file_to_mem(char *filename TSRMLS_DC)
 {
 	php_stream *stream;
 	int len;
+#if ZEND_MODULE_API_NO < 20151012
 	char *data = NULL;
-	
-	if (!(stream = php_stream_open_wrapper(filename, "rb", ENFORCE_SAFE_MODE, NULL))) {
+#else
+    zend_string *data = NULL;
+    char *rtnstr = NULL;
+    zval *stringvalue = NULL;
+#endif
+
+    if (!(stream = php_stream_open_wrapper(filename, "rb", REPORT_ERRORS, NULL))) {
 		return NULL;
 	}
 	
+#if ZEND_MODULE_API_NO < 20151012
 	if ((len = php_stream_copy_to_mem(stream, &data, PHP_STREAM_COPY_ALL, 0)) == 0) {
 		data = estrdup("");
+#else
+    data = php_stream_copy_to_mem(stream, PHP_STREAM_COPY_ALL, 0);
+	if (data == NULL || ZSTR_LEN(data) == 0) {
+        data = zend_string_init("", 0, 0);
+#endif
 	}
 	
 	php_stream_close(stream);
@@ -309,8 +340,14 @@ static char *php_blenc_file_to_mem(char *filename TSRMLS_DC)
 	if(data == NULL) {
 		return NULL;
 	}
-	
+
+#if ZEND_MODULE_API_NO < 20151012
 	return data;
+#else
+    rtnstr = strdup(ZSTR_VAL(data));
+    zend_string_release(data);
+    return rtnstr;
+#endif
 }
 
 static int php_blenc_load_keyhash(TSRMLS_D)
@@ -322,7 +359,11 @@ static int php_blenc_load_keyhash(TSRMLS_D)
 	unsigned char main_hash[33];
 	b_byte *buff = NULL;
 	int buff_len = 0;
-	char *bfdata = NULL;
+	unsigned char *bfdata = NULL;
+#if ZEND_MODULE_API_NO >= 20151012
+	zend_string *zstring_bfdata = NULL;
+    zval *rtncode = NULL;
+#endif
 	int bfdata_len = 0;
 
 	keys = php_blenc_file_to_mem(BL_G(key_file) TSRMLS_CC);
@@ -341,14 +382,29 @@ static int php_blenc_load_keyhash(TSRMLS_D)
 				continue;
 			}
 			
+#if ZEND_MODULE_API_NO < 20151012
 			bfdata = (char *)php_base64_decode((unsigned char *)key, strlen(key), &bfdata_len);
+#else
+			zstring_bfdata = php_base64_decode((unsigned char *)key, strlen(key));
+            bfdata = estrdup(ZSTR_VAL(zstring_bfdata));
+            zend_string_release(zstring_bfdata);
+#endif
 			buff = php_blenc_decode(bfdata, main_hash, bfdata_len, &buff_len TSRMLS_CC);
 
 			temp = pestrdup((char *)buff, TRUE);
+            efree(bfdata);
+            bfdata = NULL;
+#if ZEND_MODULE_API_NO < 20151012
 			if(zend_hash_next_index_insert(php_bl_keys, &temp, sizeof(char *), NULL) == FAILURE) {
+#else
+            rtncode = zend_hash_next_index_insert(php_bl_keys, (zval *)&temp);
+			if(Z_TYPE_P(rtncode) == IS_FALSE) {
+#endif
 				zend_error(E_WARNING, "Could not add a key to the keyhash!");
 			}
-			
+#if ZEND_MODULE_API_NO < 20151012
+            efree(rtncode);
+#endif
 			temp = NULL;
 			
 		}
@@ -537,15 +593,17 @@ zend_op_array *blenc_compile(zend_file_handle *file_handle, int type TSRMLS_DC) 
 	unsigned int script_len = 0;
 	zend_op_array *retval = NULL;
 	blenc_header *header;
-	zval *code;
+	zval code;
 	zend_bool validated = FALSE;
-	MAKE_STD_ZVAL(code);
-
 
 	/*
 	 * using php_stream instead zend internals
 	 */
-	if( (stream = php_stream_open_wrapper(file_handle->filename, "r", ENFORCE_SAFE_MODE | REPORT_ERRORS, NULL)) == NULL) {
+#if ZEND_MODULE_API_NO < 20151012
+    if( (stream = php_stream_open_wrapper(file_handle->filename, "r", ENFORCE_SAFE_MODE | REPORT_ERRORS, NULL)) == NULL) {
+#else
+    if( (stream = php_stream_open_wrapper(file_handle->filename, "r", REPORT_ERRORS, NULL)) == NULL) {
+#endif
 
 		zend_error(E_NOTICE, "blenc_compile: unable to open stream, compiling with default compiler.");
 		return retval = zend_compile_file_old(file_handle, type TSRMLS_CC);
@@ -595,7 +653,11 @@ zend_op_array *blenc_compile(zend_file_handle *file_handle, int type TSRMLS_DC) 
 		}
 
 		for (zend_hash_internal_pointer_reset(php_bl_keys);
+#if ZEND_MODULE_API_NO < 20151012
 			 zend_hash_get_current_data(php_bl_keys, (void **)&key) == SUCCESS;
+#else
+			 zend_hash_get_current_data(php_bl_keys) != SUCCESS;
+#endif
 			 zend_hash_move_forward(php_bl_keys)) {
 
 			decoded = php_blenc_decode(encoded, *key, script_len - sizeof(blenc_header), &decoded_len TSRMLS_CC);
@@ -633,8 +695,12 @@ zend_op_array *blenc_compile(zend_file_handle *file_handle, int type TSRMLS_DC) 
 
 	if(validated && decoded != NULL) {
 
-		ZVAL_STRINGL(code, (char *)decoded, decoded_len, TRUE);
-		retval = zend_compile_string(code, (char *)file_handle->filename TSRMLS_CC);
+#if ZEND_MODULE_API_NO < 20151012
+		ZVAL_STRINGL(&code, (char *)decoded, decoded_len, TRUE);
+#else
+		ZVAL_STRINGL(&code, (char *)decoded, decoded_len);
+#endif        
+		retval = zend_compile_string(&code, (char *)file_handle->filename TSRMLS_CC);
 
 	} else {
 

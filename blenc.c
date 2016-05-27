@@ -235,11 +235,8 @@ PHP_FUNCTION(blenc_encrypt) {
 	//zend_bool dup_key = FALSE;
 	char main_key[] = BLENC_PROTECT_MAIN_KEY;
 	char main_hash[33];
-#if ZEND_MODULE_API_NO < 20151012
 	b_byte *bfdata = NULL;
-#else
-    const unsigned char *bfdata = NULL;
-#endif
+
     int bfdata_len = 0;
 #if ZEND_MODULE_API_NO < 20151012
 	unsigned char *b64data = NULL;
@@ -266,17 +263,21 @@ PHP_FUNCTION(blenc_encrypt) {
 	//	dup_key = TRUE;
 	//}
 
+#if ZEND_MODULE_API_NO >= 20151012
+    if(strlen(data) > 0 && data_len == 0)
+    {
+          data_len = strlen(data);
+    }
+#endif
 	php_blenc_make_md5((char *)&header.md5, data, data_len TSRMLS_CC);
-	
 	retval = php_blenc_encode(data, key, data_len, &output_len TSRMLS_CC);
-
 	bfdata = php_blenc_encode(key, (unsigned char *)main_hash, strlen((char *)key), &bfdata_len TSRMLS_CC);
 #if ZEND_MODULE_API_NO < 20151012
     b64data = php_base64_encode(bfdata, bfdata_len, &b64data_len);
 #else
     b64data = php_base64_encode(bfdata, bfdata_len);
 #endif    
-    
+
 	if((stream = php_stream_open_wrapper(output_file, "wb", REPORT_ERRORS, NULL))) {
 
 		_php_stream_write(stream, (void *)&header, (int)sizeof(blenc_header) TSRMLS_CC);
@@ -289,7 +290,7 @@ PHP_FUNCTION(blenc_encrypt) {
 #else
         rtnstr = strdup(ZSTR_VAL(b64data));
         zend_string_release(b64data);
-		RETVAL_STRINGL((char *)rtnstr, b64data_len);
+		RETVAL_STRINGL((char *)rtnstr, ZSTR_LEN(b64data));
 #endif        
 	}
 
@@ -344,7 +345,7 @@ static char *php_blenc_file_to_mem(char *filename TSRMLS_DC)
 #if ZEND_MODULE_API_NO < 20151012
 	return data;
 #else
-    rtnstr = strdup(ZSTR_VAL(data));
+    rtnstr = estrdup(ZSTR_VAL(data));
     zend_string_release(data);
     return rtnstr;
 #endif

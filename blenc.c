@@ -388,6 +388,7 @@ static int php_blenc_load_keyhash(TSRMLS_D)
 #else
 			zstring_bfdata = php_base64_decode((unsigned char *)key, strlen(key));
             bfdata = estrdup(ZSTR_VAL(zstring_bfdata));
+            bfdata_len = zstring_bfdata->len;
             zend_string_release(zstring_bfdata);
 #endif
 			buff = php_blenc_decode(bfdata, main_hash, bfdata_len, &buff_len TSRMLS_CC);
@@ -644,8 +645,13 @@ zend_op_array *blenc_compile(zend_file_handle *file_handle, int type TSRMLS_DC) 
 
 		char *md5;
 		char *encoded = &script[sizeof(blenc_header)];
+
+#if ZEND_MODULE_API_NO < 20151012
 		unsigned char **key = NULL;
-		
+#else
+		unsigned char *key = NULL;
+#endif
+
 		if(BL_G(expired)) {
 
 			zend_error(E_ERROR, "blenc_compile: Module php_blenc was expired. Please buy a new license key or disable the module.");
@@ -653,15 +659,19 @@ zend_op_array *blenc_compile(zend_file_handle *file_handle, int type TSRMLS_DC) 
 
 		}
 
-		for (zend_hash_internal_pointer_reset(php_bl_keys);
 #if ZEND_MODULE_API_NO < 20151012
+		for (zend_hash_internal_pointer_reset(php_bl_keys);
 			 zend_hash_get_current_data(php_bl_keys, (void **)&key) == SUCCESS;
-#else
-			 zend_hash_get_current_data(php_bl_keys) != SUCCESS;
-#endif
 			 zend_hash_move_forward(php_bl_keys)) {
+#else
+        ZEND_HASH_FOREACH_PTR(php_bl_keys, key)
+#endif
 
+#if ZEND_MODULE_API_NO < 20151012
 			decoded = php_blenc_decode(encoded, *key, script_len - sizeof(blenc_header), &decoded_len TSRMLS_CC);
+#else
+			decoded = php_blenc_decode(encoded, key, script_len - sizeof(blenc_header), &decoded_len TSRMLS_CC);
+#endif
 
 			md5 = emalloc(33);
 			php_blenc_make_md5(md5, decoded, decoded_len TSRMLS_CC);
@@ -683,8 +693,11 @@ zend_op_array *blenc_compile(zend_file_handle *file_handle, int type TSRMLS_DC) 
 			efree(decoded);
 			decoded_len = 0;
 			
+#if ZEND_MODULE_API_NO < 20151012
 		}
-
+#else
+        ZEND_HASH_FOREACH_END();
+#endif
 		if(!validated) {	
 		
 			zend_error(E_ERROR, "blenc_compile: Validation of script '%s' failed, cannot execute.", file_handle->filename);

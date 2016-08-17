@@ -70,14 +70,14 @@ typedef unsigned char b_byte;
 typedef unsigned int  b_uint;
 
 ZEND_BEGIN_MODULE_GLOBALS(blenc)
-	char *key_file;
-    char *decoded;
-    unsigned int decoded_len;
-    unsigned int index;
-    zend_bool keys_loaded;
-    zend_bool expired;
-    char *expire_date;
-    unsigned long expire_date_numerical;
+char *key_file;
+char *decoded;
+unsigned int decoded_len;
+unsigned int index;
+zend_bool keys_loaded;
+zend_bool expired;
+char *expire_date;
+unsigned long expire_date_numerical;
 ZEND_END_MODULE_GLOBALS(blenc)
 
 size_t (*old_stream_reader)(void *, char *, size_t TSRMLS_DC);

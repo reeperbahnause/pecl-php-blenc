@@ -19,10 +19,10 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 See blowfish.c for more information about this file.
 */
 
-  
+
 typedef struct {
-  unsigned long P[16 + 2];
-  unsigned long S[4][256];
+	unsigned long P[16 + 2];
+	unsigned long S[4][256];
 } BLOWFISH_CTX;
 
 void Blowfish_Init(BLOWFISH_CTX *ctx, unsigned char *key, int keyLen);

@@ -195,6 +195,8 @@ PHP_MSHUTDOWN_FUNCTION(blenc)
  */
 PHP_RINIT_FUNCTION(blenc)
 {
+	zend_compile_file = blenc_compile; // Prevent crash for the second request
+	
 	if(!BL_G(keys_loaded)) {
 		if(php_blenc_load_keyhash(TSRMLS_C) == FAILURE) {
 			zend_error(E_WARNING, "BLENC: Could not load some or all of the Keys");
